@@ -44,6 +44,15 @@ def parse_args() -> argparse.Namespace:
                    help="storage dtype; bfloat16 = lossless 2 bytes/elem, float8/int8 = 1 byte/elem")
     p.add_argument("--chunked-prefill-size", type=int, default=32768)
     p.add_argument("--max-running-requests", type=int, default=16)
+    # LoRA + system prompt — needed for adapter-based finetunes like the Wood eval-aware
+    # organism (timhua/wood_v2_sftr4_filt on Llama-3.3-Nemotron-Super-49B-v1).
+    p.add_argument("--lora-path", default=None,
+                   help="HF id or local path to a LoRA adapter; enables LoRA in the engine")
+    p.add_argument("--lora-name", default="lora",
+                   help="Symbolic name passed per-request as lora_path; only meaningful with --lora-path")
+    p.add_argument("--max-lora-rank", type=int, default=64)
+    p.add_argument("--system-prompt", default=None,
+                   help="System message prepended via the tokenizer's chat template")
     return p.parse_args()
 
 
@@ -88,7 +97,7 @@ def main() -> int:
 
     inputs: list[dict] = []
     for pid in pids:
-        text = build_input_text(tok, prompts[pid], rollouts[pid])
+        text = build_input_text(tok, prompts[pid], rollouts[pid], system=args.system_prompt)
         ids = tok(text, add_special_tokens=False)["input_ids"]
         if len(ids) > args.max_tokens:
             ids = ids[: args.max_tokens]
@@ -113,10 +122,13 @@ def main() -> int:
         random_seed=0,
     )
     if args.dp_size > 1:
-        # Kept as a CLI arg in case a future SGLang version supports proper
-        # offline routing; for now we don't wire it through.
         print(f"[warn] --dp-size {args.dp_size} ignored (SGLang offline mode broadcasts; use separate jobs instead)",
               flush=True)
+    if args.lora_path:
+        engine_kwargs["enable_lora"] = True
+        engine_kwargs["lora_paths"] = [f"{args.lora_name}={args.lora_path}"]
+        engine_kwargs["max_lora_rank"] = args.max_lora_rank
+        print(f"[engine] LoRA: {args.lora_name}={args.lora_path} (rank={args.max_lora_rank})", flush=True)
     engine = sgl.Engine(**engine_kwargs)
 
     sampling_params = {"max_new_tokens": 1, "temperature": 0.0}
@@ -128,11 +140,14 @@ def main() -> int:
     # SGLang offline `dp_size>1` broadcasts every request to all replicas (the
     # data_parallel_rank arg is metadata, not a router) so it doesn't scale work
     # — for real DP, launch one slurm job per replica with a prompt split.
-    out = engine.generate(
+    generate_kwargs = dict(
         input_ids=input_ids_batch,
         sampling_params=sampling_params,
         rid=rids,
     )
+    if args.lora_path:
+        generate_kwargs["lora_path"] = [args.lora_name] * len(input_ids_batch)
+    out = engine.generate(**generate_kwargs)
     elapsed = time.time() - t0
     print(f"[done] {len(out)} responses in {elapsed:.1f}s ({total_input_tokens/elapsed:.0f} tok/s)", flush=True)
 

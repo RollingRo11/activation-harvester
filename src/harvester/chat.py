@@ -16,16 +16,30 @@ from __future__ import annotations
 from transformers import PreTrainedTokenizerBase
 
 
-def build_input_text(tokenizer: PreTrainedTokenizerBase, prompt: str, completion: str) -> str:
+def build_input_text(
+    tokenizer: PreTrainedTokenizerBase,
+    prompt: str,
+    completion: str,
+    system: str | None = None,
+) -> str:
+    msgs: list[dict] = []
+    if system:
+        msgs.append({"role": "system", "content": system})
+    msgs.append({"role": "user", "content": prompt})
     prefix = tokenizer.apply_chat_template(
-        [{"role": "user", "content": prompt}],
+        msgs,
         tokenize=False,
         add_generation_prompt=True,
     )
     return prefix + completion
 
 
-def tokenize_input(tokenizer: PreTrainedTokenizerBase, prompt: str, completion: str) -> list[int]:
-    text = build_input_text(tokenizer, prompt, completion)
+def tokenize_input(
+    tokenizer: PreTrainedTokenizerBase,
+    prompt: str,
+    completion: str,
+    system: str | None = None,
+) -> list[int]:
+    text = build_input_text(tokenizer, prompt, completion, system=system)
     # add_special_tokens=False because the chat template already includes any BOS/system tokens.
     return tokenizer(text, add_special_tokens=False, return_tensors=None)["input_ids"]

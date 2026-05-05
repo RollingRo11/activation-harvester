@@ -52,4 +52,5 @@ EXTRACTORS: dict[str, ResidualExtractor] = {
     "Qwen3DecoderLayer": _from_tuple_sum,
     "MistralDecoderLayer": _from_tuple_sum,
     "MixtralDecoderLayer": _from_tuple_sum,
+    "DeciLMDecoderLayer": _from_tuple_sum,  # Llama Nemotron Super (NAS-derived)
 }
