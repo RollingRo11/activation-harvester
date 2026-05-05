@@ -53,6 +53,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-lora-rank", type=int, default=64)
     p.add_argument("--system-prompt", default=None,
                    help="System message prepended via the tokenizer's chat template")
+    # Steering: write-back of a per-layer direction into the residual stream.
+    p.add_argument("--steer-path", default=None,
+                   help="safetensors file with keys layer_{L} -> fp32[hidden]; "
+                        "matching layers are steered during forward")
+    p.add_argument("--steer-alpha", type=float, default=1.0,
+                   help="Global scaling factor applied to each direction at load time")
     return p.parse_args()
 
 
@@ -69,6 +75,10 @@ def main() -> int:
     os.environ["HARVEST_MODEL_NAME"] = args.model
     os.environ["HARVEST_DTYPE"] = args.dtype
     os.environ["HARVEST_TP_SIZE"] = str(args.tp_size)
+    if args.steer_path:
+        os.environ["HARVEST_STEER_PATH"] = args.steer_path
+        os.environ["HARVEST_STEER_ALPHA"] = str(args.steer_alpha)
+        print(f"[steer] {args.steer_path} (alpha={args.steer_alpha})", flush=True)
     # Tell SGLang to load our external model package; the import side-effect installs
     # the layer + ForwardBatch patches (in subprocesses).
     os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "harvester_sglang"

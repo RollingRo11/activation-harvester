@@ -40,7 +40,8 @@ from pathlib import Path
 
 import torch
 
-from harvester_sglang._registry import EXTRACTORS, ResidualExtractor
+from harvester_sglang._registry import ADDERS, EXTRACTORS, ResidualAdder, ResidualExtractor
+from harvester_sglang import _steer
 
 
 _HARVEST_LAYERS: set[int] = {
@@ -233,10 +234,11 @@ def patch_layer_class(layer_cls: type) -> None:
     if layer_cls in _patched_layer_classes:
         return
     extractor: ResidualExtractor = EXTRACTORS.get(layer_cls.__name__)
-    if extractor is None:
+    adder: ResidualAdder = ADDERS.get(layer_cls.__name__)
+    if extractor is None or adder is None:
         raise ValueError(
-            f"no harvester extractor registered for {layer_cls.__name__}; "
-            f"add an entry to harvester_sglang/_registry.py"
+            f"no harvester extractor/adder registered for {layer_cls.__name__}; "
+            f"add entries to harvester_sglang/_registry.py"
         )
 
     install_universal_patches()
@@ -258,9 +260,18 @@ def patch_layer_class(layer_cls: type) -> None:
     def patched_forward(self, *args, **kwargs):
         out = _orig_forward(self, *args, **kwargs)
         forward_batch = args[2] if len(args) > 2 else kwargs.get("forward_batch")
-        if forward_batch is not None:
-            residual = extractor(out)
-            _capture(getattr(self, "_harvest_layer_id", None), residual, forward_batch)
+        if forward_batch is None:
+            return out
+        layer_id = getattr(self, "_harvest_layer_id", None)
+        residual = extractor(out)
+        # Capture (prefill only — _capture short-circuits on decode batches).
+        _capture(layer_id, residual, forward_batch)
+        # Steer (prefill + decode). Adds a [hidden] direction broadcast across
+        # all tokens in the current forward.
+        if _steer.is_enabled() and layer_id is not None:
+            delta = _steer.get_delta(layer_id, residual)
+            if delta is not None:
+                out = adder(out, delta)
         return out
 
     layer_cls.__init__ = patched_init

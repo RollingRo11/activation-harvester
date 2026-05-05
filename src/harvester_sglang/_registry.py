@@ -27,6 +27,8 @@ import torch
 
 
 ResidualExtractor = Callable[[object], torch.Tensor]
+# Adder writes a delta into the layer's output; dual to the extractor.
+ResidualAdder = Callable[[object, torch.Tensor], object]
 
 
 def _from_single(out) -> torch.Tensor:
@@ -42,6 +44,21 @@ def _from_tuple_sum(out) -> torch.Tensor:
     return h + r
 
 
+def _add_single(out, delta: torch.Tensor):
+    """Pattern A: post-MLP residual is the returned tensor; just add delta."""
+    if isinstance(out, tuple):
+        return (out[0] + delta,) + out[1:]
+    return out + delta
+
+
+def _add_tuple_residual(out, delta: torch.Tensor):
+    """Pattern B: out = (h, r), post-MLP residual = h + r. Adding delta to r is
+    equivalent to adding delta to the residual stream that feeds the next
+    layer's input_layernorm (which fuses h + r)."""
+    h, r = out
+    return (h, r + delta)
+
+
 # Class qualname -> extractor fn. Add new architectures here.
 EXTRACTORS: dict[str, ResidualExtractor] = {
     # Pattern A
@@ -53,4 +70,17 @@ EXTRACTORS: dict[str, ResidualExtractor] = {
     "MistralDecoderLayer": _from_tuple_sum,
     "MixtralDecoderLayer": _from_tuple_sum,
     "DeciLMDecoderLayer": _from_tuple_sum,  # Llama Nemotron Super (NAS-derived)
+}
+
+
+# Same keys as EXTRACTORS — dual adder to write a delta back into the same place
+# the extractor reads from.
+ADDERS: dict[str, ResidualAdder] = {
+    "Olmo2DecoderLayer": _add_single,
+    "LlamaDecoderLayer": _add_tuple_residual,
+    "Qwen2DecoderLayer": _add_tuple_residual,
+    "Qwen3DecoderLayer": _add_tuple_residual,
+    "MistralDecoderLayer": _add_tuple_residual,
+    "MixtralDecoderLayer": _add_tuple_residual,
+    "DeciLMDecoderLayer": _add_tuple_residual,
 }
