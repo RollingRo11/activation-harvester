@@ -216,3 +216,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code session artifacts
+.claude/
+
+# Stray dir from a misexpanded ~. literal in env vars
+~./
+
+# Job logs
+logs/
+
+# Local venv
+.venv/
+
+# Output artifacts (live under /data/artifacts/rohan)
+artifacts/
