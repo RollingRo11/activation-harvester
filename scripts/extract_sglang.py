@@ -113,7 +113,10 @@ def main() -> int:
         random_seed=0,
     )
     if args.dp_size > 1:
-        engine_kwargs["dp_size"] = args.dp_size
+        # Kept as a CLI arg in case a future SGLang version supports proper
+        # offline routing; for now we don't wire it through.
+        print(f"[warn] --dp-size {args.dp_size} ignored (SGLang offline mode broadcasts; use separate jobs instead)",
+              flush=True)
     engine = sgl.Engine(**engine_kwargs)
 
     sampling_params = {"max_new_tokens": 1, "temperature": 0.0}
@@ -122,6 +125,9 @@ def main() -> int:
     rids = [x["rid"] for x in inputs]
     input_ids_batch = [x["input_ids"] for x in inputs]
     total_input_tokens = sum(len(x) for x in input_ids_batch)
+    # SGLang offline `dp_size>1` broadcasts every request to all replicas (the
+    # data_parallel_rank arg is metadata, not a router) so it doesn't scale work
+    # — for real DP, launch one slurm job per replica with a prompt split.
     out = engine.generate(
         input_ids=input_ids_batch,
         sampling_params=sampling_params,
